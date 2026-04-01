@@ -153,6 +153,12 @@ body {
   padding: 40px 16px;
   font-size: 0.9rem;
 }
+.empty-hint {
+  font-size: 0.8rem;
+  margin-top: 8px;
+  color: var(--text2);
+  opacity: 0.7;
+}
 .request-item {
   display: flex;
   align-items: center;
@@ -188,10 +194,46 @@ body {
 }
 .empty-detail {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   height: 100%;
   color: var(--text2);
+  padding-top: 40px;
+}
+
+/* Try It Out / Sample Curls */
+.try-it { max-width: 640px; width: 100%; }
+.try-it h2 { color: var(--text); font-size: 1.3rem; margin-bottom: 4px; }
+.try-it > p { color: var(--text2); margin-bottom: 24px; font-size: 0.9rem; }
+.sample-group { margin-bottom: 20px; }
+.sample-group h3 {
+  font-size: 0.75rem;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+.sample-curl {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  padding-right: 70px;
+}
+.sample-curl pre {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  color: var(--green);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  line-height: 1.5;
+}
+.sample-curl .btn-small {
+  position: absolute;
+  top: 10px;
+  right: 10px;
 }
 .detail-toolbar {
   display: flex;

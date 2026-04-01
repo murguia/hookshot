@@ -24,13 +24,51 @@
           <span id="request-count" class="badge">0</span>
         </div>
         <div id="requests" class="requests-scroll">
-          <p class="empty-state" id="empty-state">Waiting for requests...</p>
+          <div class="empty-state" id="empty-state">
+            <p>Waiting for requests...</p>
+            <p class="empty-hint">Send one from your terminal — see examples on the right</p>
+          </div>
         </div>
       </aside>
 
       <main class="request-detail" id="request-detail">
         <div class="empty-detail" id="empty-detail">
-          <p>Select a request to inspect</p>
+          <div class="try-it">
+            <h2>Try it out</h2>
+            <p>Open a terminal and send a request. It will appear here instantly.</p>
+
+            <div class="sample-group">
+              <h3>Simple JSON POST</h3>
+              <div class="sample-curl">
+                <pre id="sample-1"></pre>
+                <button class="btn-small copy-sample" data-sample="1">Copy</button>
+              </div>
+            </div>
+
+            <div class="sample-group">
+              <h3>With headers &amp; query params</h3>
+              <div class="sample-curl">
+                <pre id="sample-2"></pre>
+                <button class="btn-small copy-sample" data-sample="2">Copy</button>
+              </div>
+            </div>
+
+            <div class="sample-group">
+              <h3>Form data</h3>
+              <div class="sample-curl">
+                <pre id="sample-3"></pre>
+                <button class="btn-small copy-sample" data-sample="3">Copy</button>
+              </div>
+            </div>
+
+            <div class="sample-group">
+              <h3>Sub-path + PUT</h3>
+              <div class="sample-curl">
+                <pre id="sample-4"></pre>
+                <button class="btn-small copy-sample" data-sample="4">Copy</button>
+              </div>
+            </div>
+          </div>
         </div>
         <div id="detail-content" class="hidden">
           <div class="detail-toolbar">
@@ -72,6 +110,38 @@
       navigator.clipboard.writeText(hookUrl);
       document.getElementById('copy-btn').textContent = 'Copied!';
       setTimeout(() => document.getElementById('copy-btn').textContent = 'Copy', 1500);
+    });
+
+    // Sample curl commands
+    const samples = {
+      1: `curl -X POST ${hookUrl} \\
+  -H "Content-Type: application/json" \\
+  -d '{"event":"order.created","id":1234}'`,
+      2: `curl -X POST "${hookUrl}?env=prod&action=deploy" \\
+  -H "Content-Type: application/json" \\
+  -H "X-GitHub-Event: push" \\
+  -H "X-Hub-Signature: sha256=abc123" \\
+  -d '{"ref":"refs/heads/main","commits":[{"message":"ship it"}]}'`,
+      3: `curl -X POST ${hookUrl} \\
+  -H "Content-Type: application/x-www-form-urlencoded" \\
+  -d "email=user@example.com&plan=pro&source=stripe"`,
+      4: `curl -X PUT ${hookUrl}/users/42/status \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer tok_live_example" \\
+  -d '{"status":"active","role":"admin"}'`
+    };
+
+    Object.entries(samples).forEach(([k, v]) => {
+      document.getElementById(`sample-${k}`).textContent = v;
+    });
+
+    document.querySelectorAll('.copy-sample').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.sample;
+        navigator.clipboard.writeText(samples[id]);
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 1500);
+      });
     });
 
     let allRequests = [];
