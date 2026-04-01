@@ -11,4 +11,4 @@ WORKDIR /app
 COPY --from=builder /app/hookshot .
 COPY --from=builder /app/static ./static
 EXPOSE 8080
-CMD sh -c 'echo "=== ENV DEBUG ===" && env | grep -iE "DATABASE|POSTGRES|PORT" && echo "=== END ===" && exec ./hookshot'
+CMD ["./hookshot"]
