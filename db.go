@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,6 +17,16 @@ type DB struct {
 }
 
 func NewDB(ctx context.Context) (*DB, error) {
+	// Log all env vars with "POSTGRES" or "DATABASE" in the name for debugging
+	for _, env := range os.Environ() {
+		if len(env) > 0 {
+			key := env[:min(len(env), 30)]
+			if strings.Contains(key, "POSTGRES") || strings.Contains(key, "DATABASE") || strings.Contains(key, "DB") {
+				log.Printf("database: env found: %s", env[:min(len(env), 60)])
+			}
+		}
+	}
+
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		dsn = os.Getenv("DATABASE_PRIVATE_URL")
@@ -25,6 +36,7 @@ func NewDB(ctx context.Context) (*DB, error) {
 	}
 	if dsn == "" {
 		dsn = "postgres://localhost:5432/hookshot?sslmode=disable"
+		log.Println("database: WARNING — no DATABASE_URL found, using localhost fallback")
 	}
 	log.Printf("database: connecting to %s", dsn[:min(len(dsn), 40)]+"...")
 
