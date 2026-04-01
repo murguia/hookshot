@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hookshot — Webhook Inspector</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container hero">
+    <h1>⚡ Hookshot</h1>
+    <p class="subtitle">Real-time webhook inspector &amp; API debugger</p>
+    <p class="desc">Get a unique URL. Send anything to it. Watch requests appear live.</p>
+    <button id="create-btn" class="btn-primary">Create Endpoint</button>
+    <div id="result" class="result hidden">
+      <p>Your webhook URL:</p>
+      <div class="url-box">
+        <code id="webhook-url"></code>
+        <button id="copy-btn" class="btn-small">Copy</button>
+      </div>
+      <a id="inspect-link" href="#" class="btn-secondary">Open Inspector →</a>
+    </div>
+  </div>
+  <script>
+    const btn = document.getElementById('create-btn');
+    const result = document.getElementById('result');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = 'Creating...';
+      const res = await fetch('/api/endpoints', { method: 'POST' });
+      const data = await res.json();
+      const base = window.location.origin;
+      document.getElementById('webhook-url').textContent = `${base}/hook/${data.id}`;
+      document.getElementById('inspect-link').href = `/inspect/${data.id}`;
+      document.getElementById('copy-btn').addEventListener('click', () => {
+        navigator.clipboard.writeText(`${base}/hook/${data.id}`);
+        document.getElementById('copy-btn').textContent = 'Copied!';
+        setTimeout(() => document.getElementById('copy-btn').textContent = 'Copy', 1500);
+      });
+      result.classList.remove('hidden');
+      btn.textContent = 'Create Another';
+      btn.disabled = false;
+    });
+  </script>
+</body>
+</html>

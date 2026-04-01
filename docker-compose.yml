@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hookshot
+      POSTGRES_PASSWORD: hookshot
+      POSTGRES_DB: hookshot
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://hookshot:hookshot@db:5432/hookshot?sslmode=disable
+      PORT: "8080"
+    depends_on:
+      - db
+
+volumes:
+  pgdata:

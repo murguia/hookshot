@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hookshot — Inspector</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <header class="inspector-header">
+      <a href="/" class="logo">⚡ Hookshot</a>
+      <div class="endpoint-info">
+        <code id="hook-url"></code>
+        <button id="copy-btn" class="btn-small">Copy</button>
+        <span id="ws-status" class="status-dot disconnected" title="Disconnected"></span>
+      </div>
+    </header>
+
+    <div class="inspector-layout">
+      <aside class="request-list" id="request-list">
+        <div class="list-header">
+          <span>Requests</span>
+          <span id="request-count" class="badge">0</span>
+        </div>
+        <div id="requests" class="requests-scroll">
+          <p class="empty-state" id="empty-state">Waiting for requests...</p>
+        </div>
+      </aside>
+
+      <main class="request-detail" id="request-detail">
+        <div class="empty-detail" id="empty-detail">
+          <p>Select a request to inspect</p>
+        </div>
+        <div id="detail-content" class="hidden">
+          <div class="detail-toolbar">
+            <span class="detail-method" id="d-method"></span>
+            <span class="detail-path" id="d-path"></span>
+            <span class="detail-time" id="d-time"></span>
+            <button id="replay-btn" class="btn-replay">↻ Replay</button>
+          </div>
+          <div class="detail-sections">
+            <section>
+              <h3>Headers</h3>
+              <table id="d-headers" class="headers-table"></table>
+            </section>
+            <section>
+              <h3>Query String</h3>
+              <pre id="d-query" class="code-block"></pre>
+            </section>
+            <section>
+              <h3>Body <span id="d-size" class="badge"></span></h3>
+              <pre id="d-body" class="code-block"></pre>
+            </section>
+            <section class="meta-row">
+              <span>From: <code id="d-remote"></code></span>
+              <span>Duration: <code id="d-duration"></code></span>
+              <span>ID: <code id="d-id"></code></span>
+            </section>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const endpointID = window.location.pathname.split('/').pop();
+    const base = window.location.origin;
+    const hookUrl = `${base}/hook/${endpointID}`;
+    document.getElementById('hook-url').textContent = hookUrl;
+    document.getElementById('copy-btn').addEventListener('click', () => {
+      navigator.clipboard.writeText(hookUrl);
+      document.getElementById('copy-btn').textContent = 'Copied!';
+      setTimeout(() => document.getElementById('copy-btn').textContent = 'Copy', 1500);
+    });
+
+    let allRequests = [];
+    let selectedID = null;
+
+    // Load history
+    fetch(`/api/endpoints/${endpointID}/requests`)
+      .then(r => r.json())
+      .then(reqs => {
+        allRequests = reqs;
+        renderList();
+      });
+
+    // WebSocket
+    function connectWS() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${proto}//${location.host}/ws/${endpointID}`);
+      const dot = document.getElementById('ws-status');
+
+      ws.onopen = () => {
+        dot.className = 'status-dot connected';
+        dot.title = 'Connected';
+      };
+      ws.onclose = () => {
+        dot.className = 'status-dot disconnected';
+        dot.title = 'Disconnected';
+        setTimeout(connectWS, 2000);
+      };
+      ws.onmessage = (e) => {
+        const req = JSON.parse(e.data);
+        allRequests.unshift(req);
+        renderList();
+        // Auto-select first if nothing selected
+        if (!selectedID) selectRequest(req.id);
+      };
+    }
+    connectWS();
+
+    function renderList() {
+      const container = document.getElementById('requests');
+      const empty = document.getElementById('empty-state');
+      document.getElementById('request-count').textContent = allRequests.length;
+
+      if (allRequests.length === 0) {
+        empty.style.display = 'block';
+        return;
+      }
+      empty.style.display = 'none';
+
+      container.innerHTML = allRequests.map(r => `
+        <div class="request-item ${r.id === selectedID ? 'selected' : ''} method-${r.method.toLowerCase()}"
+             onclick="selectRequest('${r.id}')">
+          <span class="method-badge method-${r.method.toLowerCase()}">${r.method}</span>
+          <span class="req-path">${r.path || '/'}</span>
+          <span class="req-time">${new Date(r.received_at).toLocaleTimeString()}</span>
+        </div>
+      `).join('');
+    }
+
+    window.selectRequest = function(id) {
+      selectedID = id;
+      const req = allRequests.find(r => r.id === id);
+      if (!req) return;
+
+      document.getElementById('empty-detail').classList.add('hidden');
+      document.getElementById('detail-content').classList.remove('hidden');
+
+      document.getElementById('d-method').textContent = req.method;
+      document.getElementById('d-method').className = `detail-method method-${req.method.toLowerCase()}`;
+      document.getElementById('d-path').textContent = req.path || '/';
+      document.getElementById('d-time').textContent = new Date(req.received_at).toLocaleString();
+      document.getElementById('d-remote').textContent = req.remote_addr;
+      document.getElementById('d-duration').textContent = `${req.duration_ms.toFixed(2)}ms`;
+      document.getElementById('d-id').textContent = req.id;
+      document.getElementById('d-size').textContent = formatBytes(req.size);
+      document.getElementById('d-query').textContent = req.query || '(none)';
+
+      // Headers
+      const headersTable = document.getElementById('d-headers');
+      headersTable.innerHTML = Object.entries(req.headers || {}).map(([k, vals]) =>
+        `<tr><td class="hdr-key">${esc(k)}</td><td>${vals.map(esc).join(', ')}</td></tr>`
+      ).join('');
+
+      // Body — try to pretty-print JSON
+      let body = req.body || '(empty)';
+      try {
+        body = JSON.stringify(JSON.parse(body), null, 2);
+      } catch {}
+      document.getElementById('d-body').textContent = body;
+
+      // Replay button
+      document.getElementById('replay-btn').onclick = async () => {
+        const btn = document.getElementById('replay-btn');
+        btn.disabled = true;
+        btn.textContent = '↻ Replaying...';
+        try {
+          const res = await fetch(`/api/requests/${req.id}/replay`, { method: 'POST' });
+          const data = await res.json();
+          btn.textContent = `↻ Replayed (${data.status_code || 'done'})`;
+        } catch (err) {
+          btn.textContent = '↻ Failed';
+        }
+        setTimeout(() => { btn.textContent = '↻ Replay'; btn.disabled = false; }, 2000);
+      };
+
+      renderList(); // update selection highlight
+    };
+
+    function formatBytes(b) {
+      if (b === 0) return '0 B';
+      if (b < 1024) return b + ' B';
+      return (b / 1024).toFixed(1) + ' KB';
+    }
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+  </script>
+</body>
+</html>
