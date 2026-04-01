@@ -18,8 +18,15 @@ type DB struct {
 func NewDB(ctx context.Context) (*DB, error) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
+		dsn = os.Getenv("DATABASE_PRIVATE_URL")
+	}
+	if dsn == "" {
+		dsn = os.Getenv("POSTGRES_URL")
+	}
+	if dsn == "" {
 		dsn = "postgres://localhost:5432/hookshot?sslmode=disable"
 	}
+	log.Printf("database: connecting to %s", dsn[:min(len(dsn), 40)]+"...")
 
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
