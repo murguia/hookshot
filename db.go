@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -24,11 +26,16 @@ func NewDB(ctx context.Context) (*DB, error) {
 		return nil, fmt.Errorf("connect to db: %w", err)
 	}
 
-	if err := pool.Ping(ctx); err != nil {
-		return nil, fmt.Errorf("ping db: %w", err)
+	// Retry ping — Postgres may still be starting on Railway
+	for attempt := 1; attempt <= 10; attempt++ {
+		if err = pool.Ping(ctx); err == nil {
+			return &DB{pool: pool}, nil
+		}
+		log.Printf("database: ping db: %v (attempt %d/10)", err, attempt)
+		time.Sleep(time.Duration(attempt) * time.Second)
 	}
 
-	return &DB{pool: pool}, nil
+	return nil, fmt.Errorf("ping db: %w", err)
 }
 
 func (db *DB) Migrate(ctx context.Context) error {
