@@ -256,7 +256,7 @@ Railway auto-detects the Dockerfile. Add a Postgres plugin — it provides `DATA
 
 ## Architecture
 
-![Architecture diagram](docs/architecture.svg)
+![Architecture diagram](docs/architecture.svg?v=2)
 
 <details>
 <summary>Regenerate diagram</summary>
