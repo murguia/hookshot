@@ -1,6 +1,6 @@
 digraph hookshot {
     rankdir=TB
-    bgcolor="transparent"
+    bgcolor="white"
     fontname="Helvetica"
     node [fontname="Helvetica" fontsize=11 style=filled fillcolor="#f8f9fa" color="#dee2e6" shape=box]
     edge [fontname="Helvetica" fontsize=9 color="#495057"]

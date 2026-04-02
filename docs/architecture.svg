@@ -8,9 +8,10 @@
  viewBox="0.00 0.00 354.00 617.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
 <g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 613.25)">
 <title>hookshot</title>
+<polygon fill="white" stroke="none" points="-4,4 -4,-613.25 349.5,-613.25 349.5,4 -4,4"/>
 <g id="clust1" class="cluster">
 <title>cluster_replay</title>
-<polygon fill="none" stroke="#6c757d" stroke-dasharray="5,2" points="207.5,-428.75 207.5,-601.25 337.5,-601.25 337.5,-428.75 207.5,-428.75"/>
+<polygon fill="white" stroke="#6c757d" stroke-dasharray="5,2" points="207.5,-428.75 207.5,-601.25 337.5,-601.25 337.5,-428.75 207.5,-428.75"/>
 <text xml:space="preserve" text-anchor="middle" x="272.5" y="-587.75" font-family="Helvetica,sans-Serif" font-size="10.00">Replay Handler</text>
 </g>
 <!-- webhook -->
