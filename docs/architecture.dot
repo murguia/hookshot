@@ -1,0 +1,47 @@
+digraph hookshot {
+    rankdir=TB
+    bgcolor="transparent"
+    fontname="Helvetica"
+    node [fontname="Helvetica" fontsize=11 style=filled fillcolor="#f8f9fa" color="#dee2e6" shape=box]
+    edge [fontname="Helvetica" fontsize=9 color="#495057"]
+
+    // Entrypoints
+    webhook [label="Webhook Handler" fillcolor="#d4edda" color="#28a745"]
+    browser_ws [label="Browser\n(WebSocket)" fillcolor="#cce5ff" color="#007bff"]
+    browser_sse [label="Browser\n(SSE)" fillcolor="#cce5ff" color="#007bff"]
+
+    // Core
+    errgroup [label="errgroup\n(concurrent)" shape=diamond fillcolor="#fff3cd" color="#ffc107"]
+    hub [label="Hub\n(sync.RWMutex)" fillcolor="#e2e3e5" color="#6c757d"]
+    store [label="Store\n(Postgres)" fillcolor="#d4edda" color="#28a745"]
+
+    // Delivery
+    writepump [label="WritePump\n(goroutine per client)"]
+    flusher [label="http.Flusher\n(goroutine per client)"]
+
+    // Context
+    ctx [label="context.WithTimeout\n(5s deadline)" shape=note fillcolor="#f8d7da" color="#dc3545"]
+
+    // Flow
+    webhook -> errgroup [label="captures request"]
+    errgroup -> store [label="g.Go: save"]
+    errgroup -> hub [label="g.Go: broadcast"]
+    ctx -> errgroup [label="cancels both" style=dashed]
+
+    hub -> writepump [label="send channel"]
+    hub -> flusher [label="send channel"]
+    writepump -> browser_ws [label="websocket.WriteMessage"]
+    flusher -> browser_sse [label="Flush()"]
+
+    // Replay subgraph
+    subgraph cluster_replay {
+        label="Replay Handler"
+        style=dashed
+        color="#6c757d"
+        fontsize=10
+        replay_ctx [label="context.WithTimeout\n(configurable)" shape=note fillcolor="#f8d7da" color="#dc3545"]
+        replay_req [label="Outbound HTTP\nRequest" fillcolor="#e2e3e5" color="#6c757d"]
+        replay_ctx -> replay_req [label="cancels on\ntimeout or\nclient disconnect" style=dashed]
+    }
+    replay_req -> webhook [label="replays to /hook/..."]
+}

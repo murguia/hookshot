@@ -256,18 +256,14 @@ Railway auto-detects the Dockerfile. Add a Postgres plugin — it provides `DATA
 
 ## Architecture
 
+![Architecture diagram](docs/architecture.svg)
+
+<details>
+<summary>Regenerate diagram</summary>
+
+```bash
+dot -Tsvg docs/architecture.dot -o docs/architecture.svg
 ```
-                                              Webhook Handler
-                                                    │
-                                          errgroup (concurrent)
-                                           ┌────────┴────────┐
-                                           ▼                  ▼
-Browser ──WebSocket──▶ Hub ◀── Broadcast    Store (Postgres)
-Browser ──SSE───────▶  │
-                       │
-                       │ (per-client goroutines)
-                       ▼
-                    WritePump / Flusher
-```
+</details>
 
 When a webhook arrives, the handler fans out to two goroutines via `errgroup`: save to Postgres and broadcast to viewers — concurrently, under a shared context deadline. The Hub delivers to WebSocket clients via per-connection WritePump goroutines, and to SSE clients via `http.Flusher`. No shared mutable state beyond the Hub's mutex-protected room map.
