@@ -93,6 +93,7 @@ The Server wires everything together. It depends on `Store` (not `*DB`), making 
 | `ANY` | `/hook/{id}` | Capture incoming webhook |
 | `ANY` | `/hook/{id}/{path...}` | Capture with sub-path |
 | `POST` | `/api/requests/{id}/replay` | Replay a captured request |
+| `GET` | `/api/endpoints/{id}/stream` | SSE stream for live updates |
 | `GET` | `/ws/{id}` | WebSocket stream for live updates |
 | `GET` | `/inspect/{id}` | Inspector UI |
 
@@ -120,6 +121,111 @@ type CapturedRequest struct {
 ```
 
 `CapturedRequest` stores everything about an incoming webhook — the full headers as a multi-value map (matching Go's `http.Header`), raw body, query string, source IP, and capture timing. Headers are stored as JSONB in Postgres.
+
+## Why Go
+
+Hookshot is a small project, but it exercises several things Go does better than most languages.
+
+### Goroutines and channels for real-time fan-out
+
+Each browser viewer gets two goroutines (WritePump + ReadPump). Incoming webhooks fan out to viewers through buffered channels. The `select/default` pattern in `Broadcast` drops messages for slow clients instead of blocking — a non-blocking fan-out in three lines:
+
+```go
+select {
+case c.send <- data:
+default:
+    log.Printf("dropping message for slow client on endpoint %s", endpointID)
+}
+```
+
+Doing this in Node or Python requires an async framework, a message queue, or both. In Go it's built into the language.
+
+### `sync.RWMutex` for fine-grained locking
+
+The Hub's room map uses a read-write lock. Broadcasts (frequent) take a read lock and run concurrently. Register/unregister (rare) take a write lock. No single-threaded event loop bottleneck.
+
+### `errgroup` for structured concurrency
+
+When a webhook arrives, the handler saves to the DB and broadcasts to viewers concurrently, with a shared context deadline:
+
+```go
+processCtx, processCancel := context.WithTimeout(r.Context(), 5*time.Second)
+defer processCancel()
+
+g, ctx := errgroup.WithContext(processCtx)
+g.Go(func() error { return s.db.SaveRequest(ctx, captured) })
+g.Go(func() error { s.hub.Broadcast(endpointID, captured); return nil })
+g.Wait()
+```
+
+If the DB save is slow, the context fires and the broadcast sees it too. Two real OS-level parallel goroutines, automatic cancellation propagation, five lines.
+
+### `context.Context` for cancellation
+
+The replay handler uses `context.WithTimeout` composed with the HTTP request context. This means two things cancel the outbound request: the timeout firing, or the client disconnecting. The response tells you which:
+
+```bash
+# Timeout demo
+curl -X POST ".../api/requests/{id}/replay?timeout=1ms"
+# → {"status":"timed_out","duration_ms":1.2,"timeout":"1ms"}
+
+# Cancellation demo (Ctrl-C mid-flight)
+curl -X POST ".../api/requests/{id}/replay?timeout=30s"
+# ^C → server logs: "replay xxx: cancelled (client disconnected)"
+```
+
+No separate cancellation tokens, no abort controllers. The context flows through every layer automatically.
+
+### `http.Flusher` for SSE streaming
+
+The `/api/endpoints/{id}/stream` endpoint type-asserts `ResponseWriter` to `http.Flusher` and streams events in real time:
+
+```go
+flusher, ok := w.(http.Flusher)
+// ...
+fmt.Fprintf(w, "data: %s\n\n", msg)
+flusher.Flush()
+```
+
+This is Go's interface composition at work — `ResponseWriter` doesn't promise flushing, but the concrete type supports it, and a one-line type assertion unlocks it. No streaming framework needed.
+
+### Interfaces without `implements`
+
+The `Store` interface has five methods. `*DB` satisfies it by having those methods — no `implements` keyword, no registration. Tests swap in `MockStore` with zero ceremony. Structural typing at the package boundary.
+
+### Stdlib HTTP server, zero framework
+
+Go 1.22+ pattern routing (`GET /hook/{endpointID}/{path...}`) handles the entire app. No Express, no Flask, no Spring. WebSockets, SSE, REST, and static file serving — all with `net/http` and one WebSocket library.
+
+### Built-in benchmarks
+
+Go's `testing.B` measures throughput without external tools:
+
+```bash
+go test -bench=. -run=^$ ./...
+```
+
+```
+BenchmarkWebhookCapture-8            46960   50958 ns/op   9765 B/op   112 allocs/op
+BenchmarkWebhookCaptureParallel-8   168270   13251 ns/op   9610 B/op   111 allocs/op
+BenchmarkBroadcast-8                130162   15985 ns/op    256 B/op     2 allocs/op
+```
+
+The parallel benchmark hits **3.8x** the sequential throughput on 8 cores — `b.RunParallel` spins up GOMAXPROCS goroutines and it just scales. No JMeter, no k6, no separate harness.
+
+### Graceful shutdown in 10 lines
+
+```go
+quit := make(chan os.Signal, 1)
+signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+<-quit
+
+shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer shutdownCancel()
+httpSrv.Shutdown(shutdownCtx)
+```
+
+Signal → channel → context timeout → drain. In-flight requests complete cleanly. This would be a library in most ecosystems.
 
 ## Testing
 

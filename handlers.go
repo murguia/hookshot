@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"golang.org/x/sync/errgroup"
 )
 
 type Server struct {
@@ -47,6 +49,9 @@ func (s *Server) Routes() http.Handler {
 
 	// WebSocket
 	mux.HandleFunc("GET /ws/{endpointID}", s.handleWS)
+
+	// SSE stream (demonstrates http.Flusher)
+	mux.HandleFunc("GET /api/endpoints/{endpointID}/stream", s.handleSSE)
 
 	// Webhook catch-all: register each method explicitly to avoid conflicts
 	for _, m := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"} {
@@ -137,12 +142,23 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		DurationMs: float64(time.Since(start).Microseconds()) / 1000.0,
 	}
 
-	if err := s.db.SaveRequest(r.Context(), captured); err != nil {
-		log.Printf("save request: %v", err)
-	}
+	// Fan out with a deadline: if DB save or broadcast exceeds 5s, the
+	// context is cancelled and the other goroutine sees it too.
+	processCtx, processCancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer processCancel()
 
-	// Fan out to viewers via WebSocket — this is non-blocking
-	go s.hub.Broadcast(endpointID, captured)
+	g, ctx := errgroup.WithContext(processCtx)
+	g.Go(func() error {
+		if err := s.db.SaveRequest(ctx, captured); err != nil {
+			log.Printf("save request: %v", err)
+		}
+		return nil
+	})
+	g.Go(func() error {
+		s.hub.Broadcast(endpointID, captured)
+		return nil
+	})
+	g.Wait()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -167,7 +183,19 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 		target += "?" + captured.Query
 	}
 
-	req, err := http.NewRequestWithContext(r.Context(), captured.Method, target, strings.NewReader(captured.Body))
+	// Context-based timeout: composes with the client's connection context.
+	// If the caller disconnects OR the timeout fires, the outbound request
+	// is cancelled automatically — no separate http.Client.Timeout needed.
+	timeout := 10 * time.Second
+	if t, err := time.ParseDuration(r.URL.Query().Get("timeout")); err == nil && t > 0 {
+		timeout = t
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+
+	start := time.Now()
+
+	req, err := http.NewRequestWithContext(ctx, captured.Method, target, strings.NewReader(captured.Body))
 	if err != nil {
 		http.Error(w, "failed to build replay request", http.StatusInternalServerError)
 		return
@@ -185,10 +213,25 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Header.Set("X-Hookshot-Replay", "true")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+	elapsed := float64(time.Since(start).Microseconds()) / 1000.0
+
 	if err != nil {
-		http.Error(w, "replay failed: "+err.Error(), http.StatusBadGateway)
+		result := map[string]any{"status": "failed", "duration_ms": elapsed}
+		switch {
+		case ctx.Err() == context.DeadlineExceeded:
+			result["status"] = "timed_out"
+			result["timeout"] = timeout.String()
+			log.Printf("replay %s: timed out after %s", requestID, timeout)
+		case ctx.Err() == context.Canceled:
+			result["status"] = "cancelled"
+			log.Printf("replay %s: cancelled (client disconnected)", requestID)
+		default:
+			result["error"] = err.Error()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusGatewayTimeout)
+		json.NewEncoder(w).Encode(result)
 		return
 	}
 	defer resp.Body.Close()
@@ -197,7 +240,50 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{
 		"status":      "replayed",
 		"status_code": resp.StatusCode,
+		"duration_ms": elapsed,
 	})
+}
+
+func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	endpointID := r.PathValue("endpointID")
+	if _, err := s.db.GetEndpoint(r.Context(), endpointID); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher.Flush()
+
+	// Reuse the Hub's room infrastructure — SSE client is just a Client
+	// whose send channel we drain here instead of in WritePump.
+	client := &Client{
+		conn:       nil, // no websocket conn
+		endpointID: endpointID,
+		send:       make(chan []byte, 64),
+	}
+	s.hub.Register(client)
+	defer s.hub.Unregister(client)
+
+	for {
+		select {
+		case msg, ok := <-client.send:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "data: %s\n\n", msg)
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
